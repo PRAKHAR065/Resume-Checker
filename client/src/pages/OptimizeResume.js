@@ -27,12 +27,14 @@ import {
   AutoFixHigh as OptimizeIcon,
   Download as DownloadIcon,
   CheckCircle as CheckCircleIcon,
+  Save as SaveIcon,
 } from '@mui/icons-material';
 import { getUserResumes } from '../store/slices/resumeSlice';
 import { getUserJDs } from '../store/slices/jdSlice';
 import { analyzeResume, optimizeResume } from '../store/slices/analysisSlice';
 import { toast } from 'react-toastify';
 import jsPDF from 'jspdf';
+import api from '../services/api';
 
 const OptimizeResume = () => {
   const [selectedResume, setSelectedResume] = useState('');
@@ -105,10 +107,50 @@ const OptimizeResume = () => {
     }
 
     const doc = new jsPDF();
-    const lines = doc.splitTextToSize(optimizedResume.content, 180);
-    doc.text(lines, 10, 10);
-    doc.save('optimized-resume.pdf');
-    toast.success('Resume downloaded!');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 20;
+    const maxWidth = pageWidth - 2 * margin;
+    
+    // Split content into lines
+    const lines = doc.splitTextToSize(optimizedResume.content, maxWidth);
+    
+    let y = margin;
+    const lineHeight = 7;
+    const pageHeightUsable = pageHeight - 2 * margin;
+    
+    lines.forEach((line) => {
+      if (y + lineHeight > pageHeightUsable) {
+        doc.addPage();
+        y = margin;
+      }
+      doc.text(line, margin, y);
+      y += lineHeight;
+    });
+    
+    const filename = `optimized-resume-${new Date().toISOString().split('T')[0]}.pdf`;
+    doc.save(filename);
+    toast.success('Resume downloaded as PDF!');
+  };
+
+  const handleSaveOptimized = async () => {
+    if (!optimizedResume?.content || !currentAnalysis) {
+      toast.error('No optimized resume available to save');
+      return;
+    }
+
+    try {
+      const response = await api.post('/analyze/save-optimized', {
+        analysisId: currentAnalysis.id || currentAnalysis._id,
+        filename: `optimized-${getResumeName(selectedResume)}`
+      });
+
+      toast.success('Optimized resume saved successfully!');
+      // Refresh resumes list
+      dispatch(getUserResumes());
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Error saving optimized resume');
+    }
   };
 
   const getResumeName = (id) => {
@@ -182,17 +224,117 @@ const OptimizeResume = () => {
                 Analysis Results
               </Typography>
               <Box sx={{ mt: 2 }}>
-                <Typography variant="body1">
-                  ATS Score: <strong>{currentAnalysis.atsScore}/100</strong>
-                </Typography>
-                <LinearProgress
-                  variant="determinate"
-                  value={currentAnalysis.atsScore}
-                  sx={{ mt: 1, mb: 2, height: 10, borderRadius: 1 }}
-                />
-                <Typography variant="body1">
+                <Box sx={{ mb: 3 }}>
+                  <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                    <Typography variant="body1" fontWeight="bold">
+                      ATS Score
+                    </Typography>
+                    <Typography variant="h5" color={currentAnalysis.atsScore >= 70 ? 'success.main' : currentAnalysis.atsScore >= 50 ? 'warning.main' : 'error.main'}>
+                      {currentAnalysis.atsScore}/100
+                    </Typography>
+                  </Box>
+                  <LinearProgress
+                    variant="determinate"
+                    value={currentAnalysis.atsScore}
+                    sx={{ 
+                      height: 12, 
+                      borderRadius: 1,
+                      backgroundColor: 'grey.200',
+                      '& .MuiLinearProgress-bar': {
+                        backgroundColor: currentAnalysis.atsScore >= 70 ? 'success.main' : currentAnalysis.atsScore >= 50 ? 'warning.main' : 'error.main'
+                      }
+                    }}
+                  />
+                </Box>
+                
+                <Typography variant="body2" color="text.secondary" mb={2}>
                   Match Percentage: <strong>{currentAnalysis.matchPercentage}%</strong>
                 </Typography>
+
+                {/* Detailed Breakdown */}
+                {currentAnalysis.matchDetails && (
+                  <Box sx={{ mt: 3 }}>
+                    <Typography variant="subtitle2" gutterBottom fontWeight="bold">
+                      Score Breakdown:
+                    </Typography>
+                    
+                    {currentAnalysis.matchDetails.requiredSkills && (
+                      <Box sx={{ mt: 1.5, mb: 1.5 }}>
+                        <Box display="flex" justifyContent="space-between" mb={0.5}>
+                          <Typography variant="caption" fontWeight="bold">
+                            Required Skills
+                          </Typography>
+                          <Typography variant="caption">
+                            {currentAnalysis.matchDetails.requiredSkills.matched}/{currentAnalysis.matchDetails.requiredSkills.total} ({currentAnalysis.matchDetails.requiredSkills.percentage}%)
+                          </Typography>
+                        </Box>
+                        <LinearProgress
+                          variant="determinate"
+                          value={currentAnalysis.matchDetails.requiredSkills.percentage}
+                          sx={{ height: 6, borderRadius: 1 }}
+                          color="error"
+                        />
+                      </Box>
+                    )}
+
+                    {currentAnalysis.matchDetails.preferredSkills && (
+                      <Box sx={{ mt: 1.5, mb: 1.5 }}>
+                        <Box display="flex" justifyContent="space-between" mb={0.5}>
+                          <Typography variant="caption" fontWeight="bold">
+                            Preferred Skills
+                          </Typography>
+                          <Typography variant="caption">
+                            {currentAnalysis.matchDetails.preferredSkills.matched}/{currentAnalysis.matchDetails.preferredSkills.total} ({currentAnalysis.matchDetails.preferredSkills.percentage}%)
+                          </Typography>
+                        </Box>
+                        <LinearProgress
+                          variant="determinate"
+                          value={currentAnalysis.matchDetails.preferredSkills.percentage}
+                          sx={{ height: 6, borderRadius: 1 }}
+                          color="warning"
+                        />
+                      </Box>
+                    )}
+
+                    {currentAnalysis.matchDetails.tools && (
+                      <Box sx={{ mt: 1.5, mb: 1.5 }}>
+                        <Box display="flex" justifyContent="space-between" mb={0.5}>
+                          <Typography variant="caption" fontWeight="bold">
+                            Tools & Technologies
+                          </Typography>
+                          <Typography variant="caption">
+                            {currentAnalysis.matchDetails.tools.matched}/{currentAnalysis.matchDetails.tools.total} ({currentAnalysis.matchDetails.tools.percentage}%)
+                          </Typography>
+                        </Box>
+                        <LinearProgress
+                          variant="determinate"
+                          value={currentAnalysis.matchDetails.tools.percentage}
+                          sx={{ height: 6, borderRadius: 1 }}
+                          color="info"
+                        />
+                      </Box>
+                    )}
+
+                    {currentAnalysis.matchDetails.keywords && (
+                      <Box sx={{ mt: 1.5, mb: 1.5 }}>
+                        <Box display="flex" justifyContent="space-between" mb={0.5}>
+                          <Typography variant="caption" fontWeight="bold">
+                            Keywords
+                          </Typography>
+                          <Typography variant="caption">
+                            {currentAnalysis.matchDetails.keywords.matched}/{currentAnalysis.matchDetails.keywords.total} ({currentAnalysis.matchDetails.keywords.percentage}%)
+                          </Typography>
+                        </Box>
+                        <LinearProgress
+                          variant="determinate"
+                          value={currentAnalysis.matchDetails.keywords.percentage}
+                          sx={{ height: 6, borderRadius: 1 }}
+                          color="secondary"
+                        />
+                      </Box>
+                    )}
+                  </Box>
+                )}
               </Box>
             </Paper>
           </Grid>
@@ -300,13 +442,22 @@ const OptimizeResume = () => {
             <Typography variant="h6">
               Optimized Resume
             </Typography>
-            <Button
-              variant="contained"
-              startIcon={<DownloadIcon />}
-              onClick={handleDownload}
-            >
-              Download PDF
-            </Button>
+            <Box display="flex" gap={2}>
+              <Button
+                variant="outlined"
+                startIcon={<SaveIcon />}
+                onClick={handleSaveOptimized}
+              >
+                Save as New Resume
+              </Button>
+              <Button
+                variant="contained"
+                startIcon={<DownloadIcon />}
+                onClick={handleDownload}
+              >
+                Download PDF
+              </Button>
+            </Box>
           </Box>
           <Alert severity="success" sx={{ mb: 2 }}>
             ATS Score improved from {optimizedResume.originalAtsScore || currentAnalysis?.atsScore || 0} to {optimizedResume.finalAtsScore} (+{optimizedResume.improvement || (optimizedResume.finalAtsScore - (optimizedResume.originalAtsScore || currentAnalysis?.atsScore || 0))} points)!

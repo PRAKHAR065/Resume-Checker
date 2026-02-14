@@ -42,7 +42,32 @@ const analysisSchema = new mongoose.Schema({
       },
       suggestedSection: String
     }],
-    suggestions: [String]
+    suggestions: [String],
+    matchDetails: {
+      requiredSkills: {
+        matched: Number,
+        total: Number,
+        percentage: Number
+      },
+      preferredSkills: {
+        matched: Number,
+        total: Number,
+        percentage: Number
+      },
+      tools: {
+        matched: Number,
+        total: Number,
+        percentage: Number
+      },
+      keywords: {
+        matched: Number,
+        total: Number,
+        percentage: Number
+      }
+    },
+    breakdown: {
+      type: mongoose.Schema.Types.Mixed
+    }
   },
   optimizedResume: {
     content: String,

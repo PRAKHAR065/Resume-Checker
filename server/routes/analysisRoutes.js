@@ -41,22 +41,14 @@ router.post('/', auth, [
       return res.status(404).json({ message: 'Job description not found' });
     }
 
-    // Analyze using Gemini
+    // Analyze using enhanced service (combines algorithmic + AI)
     const analysisResults = await geminiService.analyzeResumeMatch(
       resume.content.rawText,
       jd.extractedKeywords
     );
 
-    // Calculate match percentage
-    const totalKeywords = [
-      ...jd.extractedKeywords.required,
-      ...jd.extractedKeywords.preferred,
-      ...jd.extractedKeywords.keywords
-    ].length;
-    const matchedKeywords = totalKeywords - analysisResults.missingKeywords.length;
-    const matchPercentage = totalKeywords > 0 
-      ? Math.round((matchedKeywords / totalKeywords) * 100) 
-      : 0;
+    // Match percentage is already calculated in the analysis
+    const matchPercentage = analysisResults.matchPercentage || 0;
 
     // Save analysis
     const analysis = new Analysis({
@@ -64,8 +56,12 @@ router.post('/', auth, [
       resumeId,
       jdId,
       analysisResults: {
-        ...analysisResults,
-        matchPercentage
+        atsScore: analysisResults.atsScore,
+        matchPercentage,
+        missingKeywords: analysisResults.missingKeywords || [],
+        suggestions: analysisResults.suggestions || [],
+        matchDetails: analysisResults.matchDetails || null,
+        breakdown: analysisResults.breakdown || null
       }
     });
 
@@ -78,7 +74,9 @@ router.post('/', auth, [
         atsScore: analysisResults.atsScore,
         matchPercentage,
         missingKeywords: analysisResults.missingKeywords,
-        suggestions: analysisResults.suggestions
+        suggestions: analysisResults.suggestions,
+        matchDetails: analysisResults.matchDetails,
+        breakdown: analysisResults.breakdown
       }
     });
   } catch (error) {
@@ -169,6 +167,65 @@ router.get('/history', auth, async (req, res) => {
   } catch (error) {
     console.error('Get history error:', error);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   POST /api/analyze/save-optimized
+// @desc    Save optimized resume as a new resume
+// @access  Private
+router.post('/save-optimized', auth, [
+  body('analysisId').notEmpty().withMessage('Analysis ID is required'),
+  body('filename').optional().isString()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { analysisId, filename } = req.body;
+
+    // Get analysis with optimized resume
+    const analysis = await Analysis.findOne({
+      _id: analysisId,
+      userId: req.user._id
+    }).populate('resumeId');
+
+    if (!analysis) {
+      return res.status(404).json({ message: 'Analysis not found' });
+    }
+
+    if (!analysis.optimizedResume || !analysis.optimizedResume.content) {
+      return res.status(400).json({ message: 'No optimized resume found. Please optimize first.' });
+    }
+
+    // Create new resume entry with optimized content
+    const originalResume = analysis.resumeId;
+    const optimizedFilename = filename || `optimized-${originalResume.originalFilename}`;
+
+    const newResume = new Resume({
+      userId: req.user._id,
+      originalFilename: optimizedFilename,
+      fileType: originalResume.fileType,
+      filePath: originalResume.filePath, // Keep same path or generate new one
+      content: {
+        rawText: analysis.optimizedResume.content,
+        parsedSections: originalResume.content.parsedSections // Keep original structure
+      }
+    });
+
+    await newResume.save();
+
+    res.status(201).json({
+      message: 'Optimized resume saved successfully',
+      resume: {
+        id: newResume._id,
+        filename: newResume.originalFilename
+      }
+    });
+  } catch (error) {
+    console.error('Save optimized resume error:', error);
+    res.status(500).json({ message: error.message || 'Error saving optimized resume' });
   }
 });
 
